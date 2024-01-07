@@ -81,7 +81,8 @@ void clear_road_lines(int offset);
 void draw_obstacles(int lane_num, double speed, short int color);
 bool check_collision(Obstacle rect2);
 void init_obstacles();
-void draw_obstacle(Obstacle obstacle);
+bool draw_obstacle(Obstacle obstacle);
+void setup_timer(uint32_t load_value);
 
 
 void keyboard_ISR(void);
@@ -101,7 +102,7 @@ keyboard_ISR_acc();
 *   GLOBAL VARIABLES  *
 ***********************/
 int car_x = 154; // Starting position of the car
-int car_y = 220; // Starting position of the car
+int car_y = 210; // Starting position of the car
 bool keyboard_control = true; // Flag for keyboard control
 bool accelerometer_control = false; // Flag for accelerometer control
 bool leftArrowPressed = false; // Flag for left arrow key
@@ -161,6 +162,29 @@ short int car[14][35]=
     {0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0x3165, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}
 };
 
+short int car2[20][30] = {
+    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFBD, 0xFF17, 0xFD86, 0xE301, 0xC920, 0xC060, 0xC1E1, 0xD461, 0xD461, 0xC1E1, 0xC080, 0xC960, 0xF420, 0xFD23, 0xF717, 0xEF5B, 0xF79E, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFDF, 0xEF5C, 0xCE15, 0xE694, 0xEE2D, 0xE502, 0xAC45, 0xC223, 0xD881, 0xD861, 0xE2A2, 0xF604, 0xF604, 0xE2A2, 0xD861, 0xD8A1, 0xB344, 0xAC24, 0xE4E2, 0xDD48, 0xDDF0, 0xDEDA, 0xFFDF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFFF, 0xF79E, 0xF6B3, 0xEDA6, 0xDD23, 0xEDA3, 0xD503, 0x93A4, 0xC546, 0xD2E4, 0xE0A2, 0xD8A2, 0xEB03, 0xFEC6, 0xFEC6, 0xEB03, 0xD8A2, 0xE0C2, 0xCC45, 0xC527, 0x9C49, 0xDD45, 0xF5C4, 0xE587, 0xF608, 0xFF15, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xF77A, 0xDDCB, 0xEE08, 0xFE24, 0xFE65, 0xFE65, 0xEDE4, 0xDD23, 0xFEE6, 0xF3C4, 0xE0C2, 0xE0C2, 0xEB44, 0xFF27, 0xFF27, 0xEB44, 0xE0C2, 0xE103, 0xFDA6, 0xFEC6, 0xDD03, 0xE5C4, 0xF645, 0xFE65, 0xFE03, 0xF64D, 0xEED8, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFF58, 0xF521, 0xFE04, 0xFEA6, 0xFEA6, 0xF645, 0xEDE4, 0xEDA3, 0xFF47, 0xFC05, 0xE8E3, 0xF0E3, 0xFBA5, 0xFF87, 0xFF87, 0xFB85, 0xE8E3, 0xE923, 0xFE06, 0xFF26, 0xDD21, 0xEE04, 0xFEA6, 0xF686, 0xFEA6, 0xF583, 0xECE6, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFF17, 0xF440, 0xFDC3, 0xFF07, 0xFEE7, 0xE5E4, 0xC4E3, 0x93E5, 0xA4A6, 0x9AE6, 0x9144, 0x9144, 0xA2E6, 0xB549, 0xB549, 0xAB27, 0xA1C6, 0xA1E6, 0xAC68, 0xAD08, 0x93E5, 0xD565, 0xF645, 0xEE87, 0xFEE6, 0xFE8A, 0xF651, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xF75B, 0xCD0C, 0xD5AA, 0xCDA7, 0x62E7, 0x5286, 0x4206, 0x2166, 0x2166, 0x2166, 0x2186, 0x2165, 0x2166, 0x2986, 0x39E8, 0x3A28, 0x3A49, 0x3A28, 0x3A08, 0x39E8, 0x31E8, 0x5267, 0x62C6, 0x6307, 0xC586, 0xDEB2, 0xEF7E, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xF79E, 0xCE79, 0x7C0F, 0x31A6, 0x31A7, 0x29A6, 0x29A6, 0x29A6, 0x2966, 0x2166, 0x2185, 0x2165, 0x2145, 0x2125, 0x2105, 0x2145, 0x2165, 0x2165, 0x2145, 0x2145, 0x2945, 0x2145, 0x2125, 0x2125, 0x1904, 0x7BEF, 0xE71C, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFDF, 0xFFBD, 0x8C71, 0x2965, 0x4269, 0x31A7, 0x2986, 0x39E6, 0x6306, 0x6A46, 0x6186, 0x6186, 0x6226, 0x6306, 0x6305, 0x6205, 0x6165, 0x6165, 0x5A85, 0x52A5, 0x18E4, 0x10A3, 0x18E4, 0x31A6, 0x4A03, 0xAD32, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFDE, 0xFF9B, 0x9470, 0x2145, 0x31A6, 0x7B87, 0x9C87, 0xB507, 0xFF27, 0xFC87, 0xF9E7, 0xF9E7, 0xFC27, 0xFF67, 0xFF67, 0xFC27, 0xF9E7, 0xFA07, 0xFE47, 0xF707, 0x8C06, 0x8C05, 0x6B05, 0x18E3, 0x9424, 0xDE72, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xF75B, 0xD590, 0xB50B, 0x83E6, 0x31A6, 0xCDC7, 0xFF87, 0xFF47, 0xFF67, 0xFC67, 0xF9E7, 0xF9E7, 0xFC07, 0xFF47, 0xFF47, 0xFC07, 0xF9E7, 0xFA07, 0xFE27, 0xFF47, 0xFF68, 0xFFA8, 0xC586, 0x18E3, 0xDE06, 0xFFB3, 0xFFFF, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFF38, 0xF4A3, 0xFE05, 0xDE27, 0x29A6, 0xC587, 0xFF47, 0xFF27, 0xFF47, 0xFC47, 0xF9A6, 0xF9A6, 0xFBE7, 0xFF47, 0xFF47, 0xFBE7, 0xF9A6, 0xF9E6, 0xFE07, 0xFF47, 0xFF27, 0xFF68, 0xBD46, 0x10A3, 0xDDE5, 0xF710, 0xEF5C, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFF17, 0xF440, 0xF562, 0xD5A5, 0x3A06, 0xBD67, 0xFF27, 0xFF67, 0xFF88, 0xFC46, 0xF965, 0xF985, 0xFBE6, 0xFF88, 0xFF88, 0xFBE6, 0xF985, 0xF9A5, 0xFE27, 0xFF88, 0xFF88, 0xB526, 0x7B85, 0x62A4, 0xDDA5, 0xF5C6, 0xF58B, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFF78, 0xFD82, 0xED63, 0xD523, 0xB4E6, 0xDE47, 0xD5E7, 0x9447, 0x9487, 0x92E6, 0x8985, 0x8965, 0x8A85, 0x9446, 0x9446, 0x8A85, 0x8945, 0x8945, 0x8B85, 0x8C06, 0x8BE5, 0x8BE5, 0xACC6, 0xFEC6, 0xE5A3, 0xECE1, 0xF4E4, 0xFFFF, 0xFFFF },
+    { 0xF79E, 0xF737, 0xF645, 0xE563, 0xDCE2, 0xFEA6, 0xFF27, 0xC5A9, 0x4A8B, 0x4A8A, 0x428A, 0x4289, 0x31E7, 0x2166, 0x2125, 0x1905, 0x1924, 0x1924, 0x1904, 0x10C4, 0x10C4, 0x0863, 0xBD26, 0xFF47, 0xF666, 0xDD02, 0xE542, 0xF628, 0xFFFF, 0xFFFF },
+    { 0xE4E7, 0xED46, 0xF625, 0xE543, 0xDCA1, 0xEDE4, 0xFEE6, 0xC5A9, 0x4ACC, 0x5B0B, 0x52CB, 0x52AA, 0x4A89, 0x3A08, 0x2965, 0x2145, 0x2144, 0x2124, 0x2124, 0x2104, 0x1904, 0x0883, 0xB4E6, 0xFEC6, 0xE5A4, 0xDCA1, 0xE542, 0xF647, 0xE6B8, 0xDE98 },
+    { 0xFD8A, 0xF5A8, 0xFE04, 0xED83, 0xE502, 0xDCE2, 0xF625, 0xD586, 0x7367, 0x4A89, 0x4A8A, 0x52AA, 0x4A89, 0x4249, 0x3A08, 0x2986, 0x2145, 0x2124, 0x2124, 0x10C4, 0x2104, 0x62A4, 0xCD45, 0xF625, 0xE502, 0xE502, 0xED63, 0xF606, 0xE697, 0xDE77 },
+    { 0xFFFF, 0xFF79, 0xF542, 0xF563, 0xF562, 0xED02, 0xF583, 0xF5E4, 0xF625, 0xACA6, 0x6B07, 0x39E8, 0x4A49, 0x4A69, 0x4248, 0x4227, 0x3185, 0x2924, 0x2104, 0x7B44, 0xA424, 0xEE05, 0xF5C4, 0xED63, 0xED02, 0xED42, 0xF522, 0xF586, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFDE, 0xFF9B, 0xFEB2, 0xF5A8, 0xE4C1, 0xBBC1, 0xC401, 0xF562, 0xFE23, 0xDB22, 0xB861, 0xC081, 0xD2A3, 0xE5A5, 0xE5A5, 0xCA82, 0xC061, 0xC081, 0xF4E3, 0xFE03, 0xE502, 0xBBE1, 0xC3C1, 0xECE1, 0xDD08, 0xEE52, 0xFF9C, 0xFFFF, 0xFFFF },
+    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFDE, 0xEE53, 0xB513, 0xC553, 0xFED3, 0xDCC3, 0xCA40, 0xC080, 0xB820, 0xCA00, 0xDCE2, 0xDCE2, 0xCA01, 0xC040, 0xC0C0, 0xD380, 0xDCA3, 0xEE93, 0xBD53, 0xBD33, 0xF693, 0xFFDE, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
+};
+
 /**********************
 *   MAIN FUNCTION     *
 ***********************/
@@ -168,7 +192,7 @@ int main() {
 
 	clear_screen();
     start_screen();
-    setup_timer(1000000); //
+    setup_timer(100); //
     disable_A9_interrupts();
 	set_A9_IRQ_stack(); 
 	config_GIC(); 
@@ -176,12 +200,13 @@ int main() {
 	enable_A9_interrupts(); 
 
     int y_offset = 0;
-    
+    int active_obstacle = 0;
     while(true){
        
         if(timer_end && is_game_started) { // Animation loop
-            clear_road_lines(y_offset);
+            // clear_road_lines(y_offset);
             y_offset++;
+            erase_car(car_x, car_y);
 
             draw_road_lines(WHITE, y_offset);
             if (y_offset >= 10) {
@@ -190,22 +215,31 @@ int main() {
             printf("y offset : %d\n", y_offset);
 
             for (int i = 0; i < level + 3; i++) {
-                obstacles[i].y += obstacles[i].speed; // Move obstacle down
-                if (obstacles[0].y > SCREEN_HEIGHT) {
-                    // finish this level and increse level
-                    level++;
+                if (obstacles[i].y > SCREEN_HEIGHT) {
+                    active_obstacle++;
+                    continue;
                 }
+                    obstacles[i].y += obstacles[i].speed; // Move obstacle down
             }
+
+            draw_car(car_x, car_y, BLUE);
 
             // Drawing obstacles
             for (int i = 0; i < level + 3; i++) {
-                draw_obstacle(obstacles[i]);
+                if(obstacles[i].y < SCREEN_HEIGHT)
+                    draw_obstacle(obstacles[i]);
+                
                 if(check_collision(obstacles[i])){
                     //game over
                     printf("game over\n");
                     
                 }
             }
+            if (active_obstacle >= level + 3) {
+                active_obstacle = 0;
+                level++;
+            }
+
             
             
             timer_end = false;
@@ -229,6 +263,7 @@ void start_game(){
     write_text(5,10,"SCORE:");
     write_text(6,10,"0");
     init_obstacles();
+    draw_pixel_map(car2);
     
     // animate_dashed_lines();
 
@@ -367,52 +402,84 @@ void clear_road_lines(int offset){
         }
 	}
 }
+// void draw_road_lines(short int line_color, int offset){
+// 	int lane_width = ROAD_WIDTH / LANE_NUMBER;
+    
+// 	for (int i = ROAD_STARTING_X + lane_width - 2; i <ROAD_STARTING_X + 4 * lane_width + 2; ++i){
+// 		for (int j = offset; j < SCREEN_HEIGHT; ++j) {
+            
+//             if((i < ROAD_STARTING_X + lane_width +1 && i > ROAD_STARTING_X + lane_width - 1) || 
+//                 (i < ROAD_STARTING_X + 2 * lane_width +1 && i > ROAD_STARTING_X + 2 * lane_width - 1) ||
+//                 (i < ROAD_STARTING_X + 3 * lane_width +1 && i > ROAD_STARTING_X + 3 * lane_width - 1) || 
+//                 (i < ROAD_STARTING_X + 4 * lane_width +1 && i > ROAD_STARTING_X + 4 * lane_width - 1)) 
+//                 {
+//                     if(offset + 6 > j % 16 && j % 16  > offset)
+//                         plot_pixel(i, j, line_color);
+//                 }
+//         }
+// 	}
+// }
 void draw_road_lines(short int line_color, int offset){
 	int lane_width = ROAD_WIDTH / LANE_NUMBER;
-    
-	for (int i = ROAD_STARTING_X + lane_width - 2; i <ROAD_STARTING_X + 4 * lane_width + 2; ++i){
+    int len = 7, gap = 3, order = 1;
+    int y = offset + len;
+    for (int i = ROAD_STARTING_X + lane_width - 2; i <ROAD_STARTING_X + 4 * lane_width + 2; ++i){
 		for (int j = offset; j < SCREEN_HEIGHT; ++j) {
             
             if((i < ROAD_STARTING_X + lane_width +1 && i > ROAD_STARTING_X + lane_width - 1) || 
                 (i < ROAD_STARTING_X + 2 * lane_width +1 && i > ROAD_STARTING_X + 2 * lane_width - 1) ||
                 (i < ROAD_STARTING_X + 3 * lane_width +1 && i > ROAD_STARTING_X + 3 * lane_width - 1) || 
                 (i < ROAD_STARTING_X + 4 * lane_width +1 && i > ROAD_STARTING_X + 4 * lane_width - 1)) 
-                {
-                    if(offset + 6 > j % 16 && j % 16  > offset)
+                {   
+                    
+                    if(j < y){
+
                         plot_pixel(i, j, line_color);
+                    }
+                    else if (j > y && j < y + gap)
+                    {
+                        plot_pixel(i, j, BLACK);
+                    }
+                    else{
+                    y += len + gap;
+                    order++;
+                    }
                 }
         }
 	}
 }
 
+
+
 //redraw the dashed lines in the same region with the car
-void redraw_dashed_lines(){
-    int lane_width = ROAD_WIDTH / LANE_NUMBER;
+// void redraw_dashed_lines(){
+//     int lane_width = ROAD_WIDTH / LANE_NUMBER;
 
-    for(int i= car_x - 30; i< car_x + 30; i++){
-        for(int j= car_y - 30; j< car_y + 30; j++){
-            if((i < ROAD_STARTING_X + lane_width +1 && i > ROAD_STARTING_X + lane_width - 1) ||
-                (i < ROAD_STARTING_X + 2 * lane_width +1 && i > ROAD_STARTING_X + 2 * lane_width - 1) ||
-                (i < ROAD_STARTING_X + 3 * lane_width +1 && i > ROAD_STARTING_X + 3 * lane_width - 1) ||
-                (i < ROAD_STARTING_X + 4 * lane_width +1 && i > ROAD_STARTING_X + 4 * lane_width - 1))
-                {
-                    if(j % 10 > 6)
-                        plot_pixel(i, j, WHITE);
-                }
-        }
-    }
+//     for(int i= car_x - 30; i< car_x + 30; i++){
+//         for(int j= car_y - 30; j< car_y + 30; j++){
+//             if((i < ROAD_STARTING_X + lane_width +1 && i > ROAD_STARTING_X + lane_width - 1) ||
+//                 (i < ROAD_STARTING_X + 2 * lane_width +1 && i > ROAD_STARTING_X + 2 * lane_width - 1) ||
+//                 (i < ROAD_STARTING_X + 3 * lane_width +1 && i > ROAD_STARTING_X + 3 * lane_width - 1) ||
+//                 (i < ROAD_STARTING_X + 4 * lane_width +1 && i > ROAD_STARTING_X + 4 * lane_width - 1))
+//                 {
+//                     if(j % 10 > 6)
+//                         plot_pixel(i, j, WHITE);
+//                 }
+//         }
+//     }
 
-}
-void clear_old_lines(int x, int y_start, int y_end, int dash_length, int gap_length){
-    int y = y_start;
-    while (y < y_end) {
-        for (int i = 0; i < dash_length && y < y_end; i++, y++) {
-            plot_pixel(x, y, BLACK); 
-        }
-        y += gap_length;
-    }
+// }
 
-}
+// void clear_old_lines(int x, int y_start, int y_end, int dash_length, int gap_length){
+//     int y = y_start;
+//     while (y < y_end) {
+//         for (int i = 0; i < dash_length && y < y_end; i++, y++) {
+//             plot_pixel(x, y, BLACK); 
+//         }
+//         y += gap_length;
+//     }
+
+// }
 
 
 void draw_dashed_line(int x, int y_start, int y_end, int dash_length, int gap_length, int color) {
@@ -454,7 +521,8 @@ void animate_dashed_lines() {
 void draw_car(int x, int y, short int line_color){
     for (int i = 0; i < CAR_WIDTH; ++i) {
         for (int j = 0; j < CAR_HEIGHT; ++j) {
-            plot_pixel(x + i, y + j, BLUE);
+            if (x + i < ROAD_ENDING_X && x+ i > ROAD_STARTING_X && y +j < SCREEN_HEIGHT && y + j > 0)
+                plot_pixel(x + i, y + j, line_color);            
         }
     }
 }
@@ -463,10 +531,12 @@ void draw_pixel_map(char** pixel_map){
     //get dimension size of 2d char array
     int row = sizeof(pixel_map) / sizeof(pixel_map[0]);
     int col = sizeof(pixel_map[0]) / sizeof(pixel_map[0][0]);
-
+    row = 30;
+    col = 20;
+    printf("row: %d, col: %d\n", row, col);
     for(int i = 0; i < col; i++){
         for(int j = 0; j < row; j++){
-            plot_pixel(280 + i, 20+ j, pixel_map[i][j]);
+            plot_pixel(250 + i, 20+ j, car2[j][i]);
         }
     }
 }
@@ -484,15 +554,18 @@ void init_obstacles() {
     }
 }
 
-void draw_obstacle(Obstacle obstacle) {
+bool draw_obstacle(Obstacle obstacle) {
     for (int i = 0; i < obstacle.width; i++) {
         for (int j = 0; j < obstacle.height; j++) {
-            if(j < obstacle.speed + 1) plot_pixel(obstacle.x + i, obstacle.y - j, BLACK);
-            else if(obstacle.y + j > SCREEN_HEIGHT) continue;
+            if(j < obstacle.speed + 1) 
+                plot_pixel(obstacle.x + i, obstacle.y - j, BLACK);
+            else if(obstacle.y + j > SCREEN_HEIGHT)
+                continue;
             else
-            plot_pixel(obstacle.x + i, obstacle.y + j, obstacle.color);
+                plot_pixel(obstacle.x + i, obstacle.y + j, obstacle.color);
         }
     }
+    return true;
 }
 
 bool check_collision(Obstacle rect2) {
@@ -562,8 +635,8 @@ void erase_car(int x, int y){
         }
     }
     else if(leftArrowPressed){
-        x += CAR_WIDTH - 2;
-        for (int i = 0; i < 2; ++i) {
+        x += CAR_WIDTH + car_vel_x;
+        for (int i = 0; i < abs(car_vel_x); ++i) {
             for (int j = 0; j < CAR_HEIGHT; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
             }
@@ -571,7 +644,7 @@ void erase_car(int x, int y){
     }
     else if (rightArrowPressed)
     {
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < car_vel_x; ++i) {
             for (int j = 0; j < CAR_HEIGHT; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
             }
@@ -580,7 +653,7 @@ void erase_car(int x, int y){
     
     else if (upArrowPressed)
     {
-        y += CAR_HEIGHT - 2;
+        y += car_vel_y;
         for (int i = 0; i < CAR_WIDTH; ++i) {
             for (int j = 0; j < 2; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
@@ -648,10 +721,11 @@ void delete_text(int x, int y, char * text_ptr) {
 }
 
 void setup_timer(uint32_t load_value) {
-    // uint16_t counter_low = load_value & 0xFFFF;
-    // uint16_t counter_high = (load_value >> 16) & 0xFFFF;
-    uint16_t counter_low = 0xD784;
-    uint16_t counter_high = 0x017;
+    load_value = load_value * 100000;
+    uint16_t counter_low = (load_value) & 0xFFFF;
+    uint16_t counter_high = (load_value >> 16) & 0xFFFF;
+    // uint16_t counter_low = 0xD784;
+    // uint16_t counter_high = 0x017;
     
     *(volatile uint32_t *)TIMER_STARTLOW = counter_low;
     *(volatile uint32_t *)TIMER_STARTHIGH = counter_high;
@@ -704,34 +778,56 @@ void keyboard_ISR(void) {
             start_game();
 
         }
-        if(keyboard_control){
+        if(keyboard_control &&is_game_started){
 
-            erase_car(car_x, car_y);
 
             if(leftArrowPressed){  //left arrow
-                if(car_x > ROAD_STARTING_X + 2){
-                car_x -= 2;    
+                if(car_x > ROAD_STARTING_X + CAR_WIDTH){
+                car_vel_x -= 0.2;    
                 }
             }
             if(rightArrowPressed){  //right arrow
-                if(car_x < ROAD_ENDING_X - 20 ){
-                    car_x += 2;
+                if(car_x < ROAD_ENDING_X - CAR_WIDTH ){
+                    car_vel_x += 0.2;
                 }
             }
             if(upArrowPressed){ //up arrow
                 if(car_y > 0){
-                    car_y -= 2;
+                    car_vel_y -= 0.2;
                 }
                 }
             if (downArrowPressed) // down arrow
             {
-                if(car_y < SCREEN_HEIGHT - 20){
-                    car_y += 2;
+                if(car_y < SCREEN_HEIGHT - CAR_HEIGHT){
+                    car_vel_x += 0.2;
                 }
             }
+            if(car_vel_x > 6)
+                car_vel_x = 6;
+            if(car_vel_y > 6)
+                car_vel_y = 6;
+            car_x += car_vel_x;
+            car_y += car_vel_y;
+            if(car_x < ROAD_STARTING_X){
+                car_x = ROAD_STARTING_X + 3;
+                car_vel_x = 0;
+            }
+            if(car_x > ROAD_ENDING_X - CAR_WIDTH){
+                car_x = ROAD_ENDING_X - CAR_WIDTH - 3;
+                car_vel_x = 0;
+            }
+            if(car_y < 0){
+                car_y = 3;
+                car_vel_y = 0;
+            }
+            if(car_y > SCREEN_HEIGHT - CAR_HEIGHT){
+                car_y = SCREEN_HEIGHT - CAR_HEIGHT - 3;
+                car_vel_y = 0;
+            }
+            
+            
 
             // redraw_dashed_lines();
-            draw_car(car_x, car_y, BLUE);
         }
 
     }
