@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#define SIMULATION 1
+
+
 // CONSTANTS
 #define SCREEN_WIDTH  320        
 #define SCREEN_HEIGHT 240
@@ -12,11 +15,11 @@
 #define CAR_WIDTH 14
 #define CAR_HEIGHT 35
 #define NUM_OBSTACLES 12
+#define X_ACCELERATION 0.1
+#define Y_ACCELERATION 2
+#define TIMER_VALUE 100 //ms
 
-#define TIMER_STATUS (TIMER_BASE + 0x00)
-#define TIMER_CONTROL (TIMER_BASE + 0x04)
-#define TIMER_STARTLOW 0xFF202008
-#define TIMER_STARTHIGH 0xFF20200C
+
 
 // COLOR PALETTE
 #define WHITE 0xFFFF
@@ -33,17 +36,51 @@
 #define ORANGE 0xFC00
 #define BLACK 0
 
-// INTERRUPT REGISTERS
+// REGISTERS
 #define GIC_ICCPMR 0xFFFEC104
 #define GIC_ICDDCR 0xFFFED000
 #define GIC_ICCICR 0xFFFEC100
 #define GIC_ICCIAR 0xFFFEC10C
+#define SYSMGR_GENERALIO7 ((volatile unsigned int * ) 0xFFD0849C)
+#define SYSMGR_GENERALIO8 ((volatile unsigned int * ) 0xFFD084A0)
+#define SYSMGR_I2C0USEFPGA ((volatile unsigned int * ) 0xFFD08704)
+#define I2C0_ENABLE ((volatile unsigned int * ) 0xFFC0406C)
+#define I2C0_ENABLE_STATUS ((volatile unsigned int * ) 0xFFC0409C)
+#define I2C0_CON ((volatile unsigned int * ) 0xFFC04000)
+#define I2C0_TAR ((volatile unsigned int * ) 0xFFC04004)
+#define I2C0_FS_SCL_HCNT ((volatile unsigned int * ) 0xFFC0401C)
+#define I2C0_FS_SCL_LCNT ((volatile unsigned int * ) 0xFFC04020)
+#define I2C0_DATA_CMD ((volatile unsigned int * ) 0xFFC04010)
+#define I2C0_RXFLR ((volatile unsigned int * ) 0xFFC04078)
+#define TIMER_STATUS (TIMER_BASE + 0x00)
+#define TIMER_CONTROL (TIMER_BASE + 0x04)
+#define TIMER_STARTLOW 0xFF202008
+#define TIMER_STARTHIGH 0xFF20200C
+
+// COMMANDS
+#define ADXL345_REG_DEVID 0x00
+#define ADXL345_REG_DATA_FORMAT 0x31
+#define ADXL345_REG_POWER_CTL 0x2D
+#define ADXL345_REG_BW_RATE 0x2C
+#define ADXL345_REG_INT_SOURCE 0x30
+#define XL345_RANGE_2G 0x00
+#define XL345_FULL_RESOLUTION 0x08
+#define XL345_RATE_100 0x0A
+#define XL345_STANDBY 0x00
+#define XL345_MEASURE 0x08
+#define XL345_DATAREADY 0x80
+#define XL345_RANGE_16G 0x03
+#define XL345_RANGE_2G 0x00
 
 // MEMORY ADDRESSES
 #define PS2_BASE 0xFF200100
 #define VGA_BASE_ADDR 0xC8000000 
 #define VIDEO_TEXT_BASE 0xC9000000
 #define TIMER_BASE 0xFF202000
+#define HEX0_3 ((volatile unsigned int * ) 0xFF200020)
+#define HEX4_5 ((volatile unsigned int * ) 0xFF200030)
+#define LEDS ((volatile unsigned int * ) 0xFF200000)
+#define PIXEL_CTRL_ADDR 0xFF203020
 
 /**********************
 *       STRUCTS       *
@@ -83,7 +120,12 @@ bool check_collision(Obstacle rect2);
 void init_obstacles();
 bool draw_obstacle(Obstacle obstacle);
 void setup_timer(uint32_t load_value);
+void game_over();
+bool start_acc();
 
+void ADXL345_XYZ_Read();
+bool ADXL345_IsDataReady();
+void ADXL345_Init(); 
 
 void keyboard_ISR(void);
 void config_interrupt(int N, int CPU_target);
@@ -93,7 +135,8 @@ void disable_A9_interrupts(void);
 void set_A9_IRQ_stack(void);
 void config_KEYs(void);
 
-keyboard_ISR_acc();
+
+void acc_control();
 
 
 
@@ -102,7 +145,7 @@ keyboard_ISR_acc();
 *   GLOBAL VARIABLES  *
 ***********************/
 int car_x = 154; // Starting position of the car
-int car_y = 210; // Starting position of the car
+int car_y = 200; // Starting position of the car
 bool keyboard_control = true; // Flag for keyboard control
 bool accelerometer_control = false; // Flag for accelerometer control
 bool leftArrowPressed = false; // Flag for left arrow key
@@ -115,6 +158,11 @@ double car_vel_x = 0.0;  // Velocity of the car in x direction
 double car_vel_y = 0.0; // Velocity of the car in y direction
 Obstacle obstacles[NUM_OBSTACLES];
 int level = 0; // Level of the game
+int16_t acc_value[3];
+int second = 0;
+int score = 0;
+
+volatile int pixel_buffer_start;
 
 
 
@@ -163,26 +211,37 @@ short int car[14][35]=
 };
 
 short int car2[20][30] = {
-    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFBD, 0xFF17, 0xFD86, 0xE301, 0xC920, 0xC060, 0xC1E1, 0xD461, 0xD461, 0xC1E1, 0xC080, 0xC960, 0xF420, 0xFD23, 0xF717, 0xEF5B, 0xF79E, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFDF, 0xEF5C, 0xCE15, 0xE694, 0xEE2D, 0xE502, 0xAC45, 0xC223, 0xD881, 0xD861, 0xE2A2, 0xF604, 0xF604, 0xE2A2, 0xD861, 0xD8A1, 0xB344, 0xAC24, 0xE4E2, 0xDD48, 0xDDF0, 0xDEDA, 0xFFDF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFFF, 0xF79E, 0xF6B3, 0xEDA6, 0xDD23, 0xEDA3, 0xD503, 0x93A4, 0xC546, 0xD2E4, 0xE0A2, 0xD8A2, 0xEB03, 0xFEC6, 0xFEC6, 0xEB03, 0xD8A2, 0xE0C2, 0xCC45, 0xC527, 0x9C49, 0xDD45, 0xF5C4, 0xE587, 0xF608, 0xFF15, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xF77A, 0xDDCB, 0xEE08, 0xFE24, 0xFE65, 0xFE65, 0xEDE4, 0xDD23, 0xFEE6, 0xF3C4, 0xE0C2, 0xE0C2, 0xEB44, 0xFF27, 0xFF27, 0xEB44, 0xE0C2, 0xE103, 0xFDA6, 0xFEC6, 0xDD03, 0xE5C4, 0xF645, 0xFE65, 0xFE03, 0xF64D, 0xEED8, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFF58, 0xF521, 0xFE04, 0xFEA6, 0xFEA6, 0xF645, 0xEDE4, 0xEDA3, 0xFF47, 0xFC05, 0xE8E3, 0xF0E3, 0xFBA5, 0xFF87, 0xFF87, 0xFB85, 0xE8E3, 0xE923, 0xFE06, 0xFF26, 0xDD21, 0xEE04, 0xFEA6, 0xF686, 0xFEA6, 0xF583, 0xECE6, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFF17, 0xF440, 0xFDC3, 0xFF07, 0xFEE7, 0xE5E4, 0xC4E3, 0x93E5, 0xA4A6, 0x9AE6, 0x9144, 0x9144, 0xA2E6, 0xB549, 0xB549, 0xAB27, 0xA1C6, 0xA1E6, 0xAC68, 0xAD08, 0x93E5, 0xD565, 0xF645, 0xEE87, 0xFEE6, 0xFE8A, 0xF651, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xF75B, 0xCD0C, 0xD5AA, 0xCDA7, 0x62E7, 0x5286, 0x4206, 0x2166, 0x2166, 0x2166, 0x2186, 0x2165, 0x2166, 0x2986, 0x39E8, 0x3A28, 0x3A49, 0x3A28, 0x3A08, 0x39E8, 0x31E8, 0x5267, 0x62C6, 0x6307, 0xC586, 0xDEB2, 0xEF7E, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xF79E, 0xCE79, 0x7C0F, 0x31A6, 0x31A7, 0x29A6, 0x29A6, 0x29A6, 0x2966, 0x2166, 0x2185, 0x2165, 0x2145, 0x2125, 0x2105, 0x2145, 0x2165, 0x2165, 0x2145, 0x2145, 0x2945, 0x2145, 0x2125, 0x2125, 0x1904, 0x7BEF, 0xE71C, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFDF, 0xFFBD, 0x8C71, 0x2965, 0x4269, 0x31A7, 0x2986, 0x39E6, 0x6306, 0x6A46, 0x6186, 0x6186, 0x6226, 0x6306, 0x6305, 0x6205, 0x6165, 0x6165, 0x5A85, 0x52A5, 0x18E4, 0x10A3, 0x18E4, 0x31A6, 0x4A03, 0xAD32, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFDE, 0xFF9B, 0x9470, 0x2145, 0x31A6, 0x7B87, 0x9C87, 0xB507, 0xFF27, 0xFC87, 0xF9E7, 0xF9E7, 0xFC27, 0xFF67, 0xFF67, 0xFC27, 0xF9E7, 0xFA07, 0xFE47, 0xF707, 0x8C06, 0x8C05, 0x6B05, 0x18E3, 0x9424, 0xDE72, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xF75B, 0xD590, 0xB50B, 0x83E6, 0x31A6, 0xCDC7, 0xFF87, 0xFF47, 0xFF67, 0xFC67, 0xF9E7, 0xF9E7, 0xFC07, 0xFF47, 0xFF47, 0xFC07, 0xF9E7, 0xFA07, 0xFE27, 0xFF47, 0xFF68, 0xFFA8, 0xC586, 0x18E3, 0xDE06, 0xFFB3, 0xFFFF, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFF38, 0xF4A3, 0xFE05, 0xDE27, 0x29A6, 0xC587, 0xFF47, 0xFF27, 0xFF47, 0xFC47, 0xF9A6, 0xF9A6, 0xFBE7, 0xFF47, 0xFF47, 0xFBE7, 0xF9A6, 0xF9E6, 0xFE07, 0xFF47, 0xFF27, 0xFF68, 0xBD46, 0x10A3, 0xDDE5, 0xF710, 0xEF5C, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFF17, 0xF440, 0xF562, 0xD5A5, 0x3A06, 0xBD67, 0xFF27, 0xFF67, 0xFF88, 0xFC46, 0xF965, 0xF985, 0xFBE6, 0xFF88, 0xFF88, 0xFBE6, 0xF985, 0xF9A5, 0xFE27, 0xFF88, 0xFF88, 0xB526, 0x7B85, 0x62A4, 0xDDA5, 0xF5C6, 0xF58B, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFF78, 0xFD82, 0xED63, 0xD523, 0xB4E6, 0xDE47, 0xD5E7, 0x9447, 0x9487, 0x92E6, 0x8985, 0x8965, 0x8A85, 0x9446, 0x9446, 0x8A85, 0x8945, 0x8945, 0x8B85, 0x8C06, 0x8BE5, 0x8BE5, 0xACC6, 0xFEC6, 0xE5A3, 0xECE1, 0xF4E4, 0xFFFF, 0xFFFF },
-    { 0xF79E, 0xF737, 0xF645, 0xE563, 0xDCE2, 0xFEA6, 0xFF27, 0xC5A9, 0x4A8B, 0x4A8A, 0x428A, 0x4289, 0x31E7, 0x2166, 0x2125, 0x1905, 0x1924, 0x1924, 0x1904, 0x10C4, 0x10C4, 0x0863, 0xBD26, 0xFF47, 0xF666, 0xDD02, 0xE542, 0xF628, 0xFFFF, 0xFFFF },
-    { 0xE4E7, 0xED46, 0xF625, 0xE543, 0xDCA1, 0xEDE4, 0xFEE6, 0xC5A9, 0x4ACC, 0x5B0B, 0x52CB, 0x52AA, 0x4A89, 0x3A08, 0x2965, 0x2145, 0x2144, 0x2124, 0x2124, 0x2104, 0x1904, 0x0883, 0xB4E6, 0xFEC6, 0xE5A4, 0xDCA1, 0xE542, 0xF647, 0xE6B8, 0xDE98 },
-    { 0xFD8A, 0xF5A8, 0xFE04, 0xED83, 0xE502, 0xDCE2, 0xF625, 0xD586, 0x7367, 0x4A89, 0x4A8A, 0x52AA, 0x4A89, 0x4249, 0x3A08, 0x2986, 0x2145, 0x2124, 0x2124, 0x10C4, 0x2104, 0x62A4, 0xCD45, 0xF625, 0xE502, 0xE502, 0xED63, 0xF606, 0xE697, 0xDE77 },
-    { 0xFFFF, 0xFF79, 0xF542, 0xF563, 0xF562, 0xED02, 0xF583, 0xF5E4, 0xF625, 0xACA6, 0x6B07, 0x39E8, 0x4A49, 0x4A69, 0x4248, 0x4227, 0x3185, 0x2924, 0x2104, 0x7B44, 0xA424, 0xEE05, 0xF5C4, 0xED63, 0xED02, 0xED42, 0xF522, 0xF586, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFDE, 0xFF9B, 0xFEB2, 0xF5A8, 0xE4C1, 0xBBC1, 0xC401, 0xF562, 0xFE23, 0xDB22, 0xB861, 0xC081, 0xD2A3, 0xE5A5, 0xE5A5, 0xCA82, 0xC061, 0xC081, 0xF4E3, 0xFE03, 0xE502, 0xBBE1, 0xC3C1, 0xECE1, 0xDD08, 0xEE52, 0xFF9C, 0xFFFF, 0xFFFF },
-    { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFDE, 0xEE53, 0xB513, 0xC553, 0xFED3, 0xDCC3, 0xCA40, 0xC080, 0xB820, 0xCA00, 0xDCE2, 0xDCE2, 0xCA01, 0xC040, 0xC0C0, 0xD380, 0xDCA3, 0xEE93, 0xBD53, 0xBD33, 0xF693, 0xFFDE, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
+{0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xF5AB,0xCA41,0xB0A0,0xBAE0,0xC3C0,0xB140,0xC140,0xE3C0,0xF717,0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xFFFF},
+{0xFFFF,0xFFFF,0xFFFF,0xFFFF,0xEF9D,0xE62F,0xED24,0xD1E1,0xC880,0xDBE2,0xE502,0xC9A1,0xC8C1,0xE401,0xE568,0xD613,0xEF7C,0xFFFF,0xFFFF,0xFFFF},
+{0xFFFF,0xFFFF,0xF7BD,0xBD71,0xDDAB,0xE564,0x9385,0xB942,0xD0A1,0xECA3,0xF5E4,0xD9E2,0xD0A1,0x8A85,0xCCA3,0xE566,0xC5D2,0xEF5C,0xFFFF,0xFFFF},
+{0xFFFF,0xFFFF,0xF68F,0xD545,0xE564,0x9BE4,0xAC85,0xD1C3,0xD8C2,0xED04,0xF645,0xDA22,0xD8C2,0xC3E5,0x9C49,0xD545,0xDD87,0xEE0A,0xF77A,0xFFFF},
+{0xFFFF,0xF7BC,0xF629,0xF5E4,0xF604,0xC4C3,0xE5E5,0xE243,0xD8E2,0xED45,0xF6A6,0xE243,0xD8E2,0xED25,0xC506,0xD564,0xEDE4,0xF5C4,0xF778,0xFFFF},
+{0xFFFF,0xF6AF,0xF626,0xF645,0xF645,0xDD63,0xF645,0xE263,0xD903,0xF566,0xF6C7,0xE264,0xD903,0xF545,0xDD63,0xE5E4,0xF645,0xF625,0xF6D2,0xF7BC},
+{0xFFFF,0xF62A,0xF625,0xF686,0xEE25,0xDD63,0xEE86,0xE284,0xE123,0xF586,0xFEE7,0xE284,0xE123,0xF586,0xDD63,0xEE05,0xF686,0xF665,0xED66,0xF739},
+{0xFFFF,0xED88,0xF625,0xF686,0xE5E4,0xDD83,0xF6A6,0xEAA4,0xE144,0xF5A6,0xFF07,0xEAA4,0xE144,0xF586,0xDD63,0xE604,0xE626,0xF686,0xED44,0xF738},
+{0xFFFF,0xED47,0xF645,0xF6C7,0xDD84,0x7B64,0x6B26,0x61C5,0x6165,0x7B68,0x7BE9,0x7A88,0x7228,0x7B68,0x7347,0xC545,0xEE66,0xF6C7,0xF6D2,0xF7BD},
+{0xFFFF,0xF651,0xF6A8,0x8C27,0x62C5,0x39E6,0x2986,0x2985,0x2965,0x31A6,0x4228,0x4248,0x4248,0x4228,0x4228,0x62E6,0x7347,0xD607,0xFF98,0xFFFE},
+{0xFFFF,0xC5F6,0x840A,0x4226,0x31A6,0x29A6,0x2986,0x2985,0x2965,0x2965,0x2985,0x31C6,0x31C7,0x31C6,0x31A6,0x31A6,0x31A6,0x62E6,0xAD53,0xEF7D},
+{0xFFFF,0xE71B,0x5B0B,0x31C6,0x31A6,0x29A6,0x2986,0x2985,0x2965,0x2965,0x2145,0x2965,0x2965,0x2965,0x2145,0x2144,0x2124,0x2124,0xB5B6,0xF7BE},
+{0xFFFF,0xF7BD,0x5B0B,0x4228,0x31E7,0x29A6,0x2986,0x2985,0x2965,0x2965,0x2145,0x2144,0x2124,0x2124,0x2104,0x1904,0x2986,0x39C4,0xCE78,0xFFFF},
+{0xFFFF,0xF7BC,0x5AEB,0x39E7,0x31C6,0x4246,0xA4A7,0xBAA6,0xB1C6,0xBC66,0xBD46,0xB2A6,0xB1C6,0xB466,0x4224,0x1904,0x2124,0x62C4,0xDED8,0xFFFF},
+{0xFFFF,0xF75A,0x5AEA,0x31A6,0x9C87,0xC5A7,0xEEC7,0xF347,0xF207,0xFDC7,0xFF07,0xF347,0xF207,0xFDC7,0xC586,0xB546,0x4204,0x9425,0xEF59,0xFFFF},
+{0xFFFF,0xF739,0x8C4A,0x4226,0xCDC7,0xFF07,0xFF07,0xF347,0xF207,0xF5C7,0xFF07,0xF347,0xF207,0xF5C7,0xFF07,0xFF07,0x5264,0xBD46,0xF799,0xFFFF},
+{0xFFFF,0xF651,0xDDE8,0x5AC6,0xCDC7,0xFF07,0xFF07,0xF327,0xF206,0xF5C7,0xFF07,0xF327,0xF206,0xF5C7,0xFF07,0xFF07,0x5264,0xC566,0xF7B9,0xFFFF},
+{0xFFFF,0xED69,0xF625,0x62E6,0xCDC7,0xFF07,0xFF07,0xF306,0xF1E6,0xF5C7,0xFF07,0xF306,0xF1E6,0xF5C7,0xFF07,0xFF07,0x5264,0xBD46,0xF757,0xF7DE},
+{0xFFFF,0xED47,0xEDE4,0x5AC6,0xCDC7,0xFF07,0xFF07,0xF306,0xE9C5,0xF5C7,0xFF07,0xF306,0xE9C5,0xF5C7,0xFF07,0xDE27,0x4224,0xBD05,0xF60C,0xF77A},
+{0xFFFF,0xED47,0xE583,0x7B86,0xC587,0xF6C7,0xFF07,0xEAE6,0xE9A5,0xF5A7,0xFF07,0xEAE6,0xE9A5,0xF5A7,0xFF07,0x7365,0x9425,0xDDA4,0xED03,0xF718},
+{0xFFFF,0xF64A,0xD523,0xCD45,0xE667,0x8C27,0x6B46,0x61E5,0x6185,0x62A6,0x6305,0x61A4,0x5944,0x6284,0x5AA4,0x9C86,0xE626,0xDD63,0xE4A1,0xF717},
+{0xFFFF,0xF68B,0xD522,0xEE05,0xF6E7,0x73A9,0x4A89,0x4249,0x31A6,0x2965,0x2145,0x2124,0x2124,0x2104,0x18E3,0xC586,0xF686,0xDD43,0xE563,0xF778},
+{0xF77B,0xEE4A,0xDCE2,0xEDE4,0xF6C7,0x7C0A,0x52EB,0x4AAA,0x4248,0x2986,0x2145,0x2124,0x2124,0x2104,0x18E3,0xC566,0xF666,0xDD02,0xE5A4,0xF778},
+{0xED27,0xEDC5,0xDCC2,0xE5A4,0xF6A6,0x7BEA,0x52EB,0x4AAA,0x4269,0x31A6,0x2145,0x2124,0x2124,0x2104,0x18E3,0xC566,0xE5E5,0xD4C2,0xE5A4,0xF735},
+{0xEC60,0xED83,0xDD02,0xD503,0xEE45,0x6B27,0x4AAA,0x4AAA,0x4269,0x3A08,0x2965,0x2124,0x2124,0x2104,0x18E3,0xC545,0xE584,0xDCC2,0xEDA4,0xF6F4},
+{0xF717,0xF608,0xE543,0xDCE2,0xEDC4,0xC545,0x62E8,0x4A89,0x4269,0x4228,0x31C6,0x2145,0x2124,0x2104,0x8BC4,0xDDA4,0xDD23,0xE522,0xED83,0xF737},
+{0xFFFF,0xF5C9,0xED63,0xE522,0xE543,0xE5A4,0xC525,0x52A6,0x4248,0x4228,0x39E7,0x2945,0x2124,0x8BC4,0xD564,0xE563,0xE522,0xED43,0xECE1,0xF738},
+{0xFFFF,0xF738,0xED87,0xED22,0xE522,0xE563,0xEDC4,0xB203,0xA903,0xB3E5,0xBCC5,0xA1C3,0x98A2,0xDCA3,0xE583,0xE522,0xED22,0xD481,0xEE30,0xF7BD},
+{0xFFFF,0xFFFF,0xF738,0xD4C6,0x7A21,0xCC42,0xED42,0xD9A1,0xD060,0xEC63,0xF5A3,0xD9A1,0xD060,0xEC42,0xDCC2,0x8241,0xC3A1,0xE610,0xF7BD,0xFFFF},
+{0xFFFF,0xFFFF,0xFFFF,0xEEF7,0xC5D6,0xE6B6,0xD4C6,0xB960,0xB060,0xC361,0xCC61,0xB940,0xB0C0,0xC340,0xE610,0xC5D6,0xE695,0xF7BD,0xFFFF,0xFFFF},
+
 };
 
 /**********************
@@ -190,33 +249,59 @@ short int car2[20][30] = {
 ***********************/
 int main() {
 
-	clear_screen();
+    volatile int *pixel_ctrl_ptr = (int *)PIXEL_CTRL_ADDR;
+	pixel_buffer_start = *pixel_ctrl_ptr; /* Read location of the pixel buffer from the pixel buffer controller */
+    
+    clear_screen();
     start_screen();
-    setup_timer(100); //
+    setup_timer(TIMER_VALUE); //
     disable_A9_interrupts();
 	set_A9_IRQ_stack(); 
 	config_GIC(); 
 	config_KEYs(); 
-	enable_A9_interrupts(); 
+	enable_A9_interrupts();
 
+    
     int y_offset = 0;
-    int active_obstacle = 0;
+    int passive_obstacle = 0;
+    int time_loop = 0;
     while(true){
        
-        if(timer_end && is_game_started) { // Animation loop
-            // clear_road_lines(y_offset);
-            y_offset++;
-            erase_car(car_x, car_y);
+        if(is_game_started) { // Animation loop
 
-            draw_road_lines(WHITE, y_offset);
+            y_offset++;
+            if(!SIMULATION) 
+            {
+                acc_control();
+                if(accelerometer_control){
+                    if (ADXL345_IsDataReady()) {
+                        ADXL345_XYZ_Read(acc_value);
+                    }
+                }
+            }
+
+            if(timer_end){
+                time_loop++;
+                if (time_loop == (int)1000/TIMER_VALUE){
+                    second++;
+                    delete_text(12, 10,"");
+                    char str[10];
+                    score += second * level;
+                    sprintf(str, "%d", score);
+                    write_text(12, 10, str);
+                    time_loop = 0;
+                }
+                    draw_road_lines(WHITE, y_offset);
+                    timer_end = false;
+            }
+            
             if (y_offset >= 10) {
                 y_offset = 0; // Reset the offset after a complete cycle
             }
-            printf("y offset : %d\n", y_offset);
 
             for (int i = 0; i < level + 3; i++) {
-                if (obstacles[i].y > SCREEN_HEIGHT) {
-                    active_obstacle++;
+                if (obstacles[i].y >= SCREEN_HEIGHT) {
+                    passive_obstacle++;
                     continue;
                 }
                     obstacles[i].y += obstacles[i].speed; // Move obstacle down
@@ -228,21 +313,31 @@ int main() {
             for (int i = 0; i < level + 3; i++) {
                 if(obstacles[i].y < SCREEN_HEIGHT)
                     draw_obstacle(obstacles[i]);
+
                 
-                if(check_collision(obstacles[i])){
-                    //game over
-                    printf("game over\n");
+                // if(check_collision(obstacles[i])){
+                //     //game over
+                //     printf("game over\n");
+                //     // game_over();
                     
-                }
+                // }
             }
-            if (active_obstacle >= level + 3) {
-                active_obstacle = 0;
-                level++;
+            if (passive_obstacle >= level + 3) {
+                passive_obstacle = 0;
+                // for (int i = 0; i < level + 3; i++) {
+                //     if(obstacles[i].y < SCREEN_HEIGHT)
+                //         obstacles[i].y = 0;
+                // }
+                if(level < 4) level++;
+                printf("level: %d\n", level);
+                for(int i = 0; i < level + 3; i++){
+                    obstacles[i].y = 0;
+                    obstacles[i].speed += 1;
+                }
             }
 
             
             
-            timer_end = false;
         }
         
     }
@@ -261,18 +356,14 @@ void start_game(){
     draw_environment();
     draw_car(car_x, car_y, BLUE);
     write_text(5,10,"SCORE:");
-    write_text(6,10,"0");
+    write_text(12,10,"0");
     init_obstacles();
-    draw_pixel_map(car2);
     
     // animate_dashed_lines();
 
 }
 void plot_pixel(int x, int y, short int line_color)
 {
-	volatile int *pixel_ctrl_ptr = (int *)0xFF203020;
-	/* Read location of the pixel buffer from the pixel buffer controller */
-	volatile int pixel_buffer_start = *pixel_ctrl_ptr;
     *(short int *)(pixel_buffer_start + (y << 10) + (x << 1)) = line_color;
 }   
 
@@ -308,7 +399,6 @@ void start_screen(){
     
     //write start screen text and mode choosing text
     int offset = 100, offset2 = 20;
-    int start_point = 44;
 
     write_text(25, 10, "Eyup Sahin");
     write_text(40, 10, "Efdal Ayas"); 
@@ -421,28 +511,29 @@ void clear_road_lines(int offset){
 // }
 void draw_road_lines(short int line_color, int offset){
 	int lane_width = ROAD_WIDTH / LANE_NUMBER;
-    int len = 7, gap = 3, order = 1;
+    int len = 7, gap = 5;
     int y = offset + len;
-    for (int i = ROAD_STARTING_X + lane_width - 2; i <ROAD_STARTING_X + 4 * lane_width + 2; ++i){
-		for (int j = offset; j < SCREEN_HEIGHT; ++j) {
+		for (int j = offset; j < SCREEN_HEIGHT; j++) {
+            for (int i = ROAD_STARTING_X + lane_width - 2; i <ROAD_STARTING_X + 4 * lane_width + 2; i++){
             
             if((i < ROAD_STARTING_X + lane_width +1 && i > ROAD_STARTING_X + lane_width - 1) || 
                 (i < ROAD_STARTING_X + 2 * lane_width +1 && i > ROAD_STARTING_X + 2 * lane_width - 1) ||
                 (i < ROAD_STARTING_X + 3 * lane_width +1 && i > ROAD_STARTING_X + 3 * lane_width - 1) || 
                 (i < ROAD_STARTING_X + 4 * lane_width +1 && i > ROAD_STARTING_X + 4 * lane_width - 1)) 
                 {   
-                    
                     if(j < y){
 
                         plot_pixel(i, j, line_color);
                     }
-                    else if (j > y && j < y + gap)
+                    else if ((j > y) && (j < (y + gap)))
                     {
                         plot_pixel(i, j, BLACK);
                     }
-                    else{
-                    y += len + gap;
-                    order++;
+                    else if (j > y + gap){
+                        y += len + gap;
+                        if(y > SCREEN_HEIGHT){
+                            y = offset + len;
+                        }
                     }
                 }
         }
@@ -519,10 +610,10 @@ void animate_dashed_lines() {
 
 
 void draw_car(int x, int y, short int line_color){
-    for (int i = 0; i < CAR_WIDTH; ++i) {
-        for (int j = 0; j < CAR_HEIGHT; ++j) {
+    for (int j = 0; j < CAR_HEIGHT; ++j) {
+        for (int i = 0; i < CAR_WIDTH; ++i) {
             if (x + i < ROAD_ENDING_X && x+ i > ROAD_STARTING_X && y +j < SCREEN_HEIGHT && y + j > 0)
-                plot_pixel(x + i, y + j, line_color);            
+                plot_pixel(x + i, y + j, BLUE);            
         }
     }
 }
@@ -536,7 +627,7 @@ void draw_pixel_map(char** pixel_map){
     printf("row: %d, col: %d\n", row, col);
     for(int i = 0; i < col; i++){
         for(int j = 0; j < row; j++){
-            plot_pixel(250 + i, 20+ j, car2[j][i]);
+            // plot_pixel(250 + i, 20+ j, car2[j][i]);
         }
     }
 }
@@ -547,19 +638,19 @@ void init_obstacles() {
         // Initialize obstacle properties (position, size, color)
         obstacles[i].height = 20 + rand() % 10; //  height
         obstacles[i].width = 20; //  width
-        obstacles[i].x = ROAD_STARTING_X + (rand() % 4) * ROAD_WIDTH/LANE_NUMBER + (ROAD_WIDTH/LANE_NUMBER - obstacles[i].width)/2;
+        obstacles[i].x = ROAD_STARTING_X + (rand() % 5) * ROAD_WIDTH/LANE_NUMBER + (ROAD_WIDTH/LANE_NUMBER - obstacles[i].width)/2;
         obstacles[i].y =  0; // Start off-screen
-        obstacles[i].speed = 1 + rand() % 3; // Example speed
-        obstacles[i].color = RED; // Example color
+        obstacles[i].speed = 2; // initial speed
+        obstacles[i].color = RED; //  color
     }
 }
 
 bool draw_obstacle(Obstacle obstacle) {
-    for (int i = 0; i < obstacle.width; i++) {
-        for (int j = 0; j < obstacle.height; j++) {
-            if(j < obstacle.speed + 1) 
+    for (int j = 0; j < obstacle.height; j++) {
+        for (int i = 0; i < obstacle.width; i++) {
+            if(j < obstacle.speed + 1 && obstacle.y - j > 0) 
                 plot_pixel(obstacle.x + i, obstacle.y - j, BLACK);
-            else if(obstacle.y + j > SCREEN_HEIGHT)
+            else if(obstacle.y + j >= SCREEN_HEIGHT)
                 continue;
             else
                 plot_pixel(obstacle.x + i, obstacle.y + j, obstacle.color);
@@ -569,15 +660,14 @@ bool draw_obstacle(Obstacle obstacle) {
 }
 
 bool check_collision(Obstacle rect2) {
-    // Check if there is no overlap on x-axis
-    if (car_x > rect2.x + rect2.width || rect2.x > car_x + CAR_WIDTH) {
-        return false; // No collision
-    }
-    // Check if there is no overlap on y-axis
-    if (car_y > rect2.y + rect2.height || rect2.y > car_y + CAR_HEIGHT) {
-        return false; // No collision
-    }
-    return true; // Collision detected
+    
+    if ((car_x > rect2.x + rect2.width || rect2.x > car_x + CAR_WIDTH) && 
+      (car_y > rect2.y + rect2.height || rect2.y > car_y + CAR_HEIGHT)) // Check if there is no overlap on x and y-axis
+        return false;
+    else
+        return true; // Collision detected
+    
+      
 }
 
 void draw_line(int x0, int y0, int x1, int y1, short int line_color) {
@@ -626,48 +716,56 @@ void swap(int *first, int *second){
 }
 
 void erase_car(int x, int y){
-
+    
+    
     if((leftArrowPressed + rightArrowPressed + upArrowPressed + downArrowPressed) > 1){
+        x += leftArrowPressed * CAR_WIDTH - rightArrowPressed * car_vel_x;
+        y += upArrowPressed * CAR_HEIGHT - downArrowPressed * car_vel_y;
         for (int i = 0; i < CAR_WIDTH; ++i) {
             for (int j = 0; j < CAR_HEIGHT; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
             }
         }
     }
-    else if(leftArrowPressed){
-        x += CAR_WIDTH + car_vel_x;
-        for (int i = 0; i < abs(car_vel_x); ++i) {
+    else {
+
+    if(car_vel_x > 0){ // right arrow pressed
+        x -= car_vel_x;
+        for (int i = 0; i < (int)car_vel_x + 1; ++i) {
             for (int j = 0; j < CAR_HEIGHT; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
             }
         }
     }
-    else if (rightArrowPressed)
+    else if (car_vel_x < 0)
     {
-        for (int i = 0; i < car_vel_x; ++i) {
+        x += CAR_WIDTH;
+        for (int i = 0; i < abs((int)car_vel_x); ++i) {
             for (int j = 0; j < CAR_HEIGHT; ++j) {
                 plot_pixel(x + i, y + j, BLACK);
             }
+        }   
+    }
+    if (car_vel_y > 0) // down arrow pressed
+    {
+        y -= car_vel_y;
+        for (int i = 0; i < CAR_WIDTH; ++i) {
+            for (int j = 0; j < (int)car_vel_y; ++j) {
+                plot_pixel(x + i, y + j, BLACK);
+            }
         }
+    }
+    else if (car_vel_y < 0) // up arrow pressed
+    {   
+        y += CAR_HEIGHT;
+        for (int i = 0; i < CAR_WIDTH; ++i) {
+            for (int j = 0; j < abs((int)car_vel_y); ++j) {
+                plot_pixel(x + i, y  + j, BLACK);
+            }
+        }   
+    }
     }
     
-    else if (upArrowPressed)
-    {
-        y += car_vel_y;
-        for (int i = 0; i < CAR_WIDTH; ++i) {
-            for (int j = 0; j < 2; ++j) {
-                plot_pixel(x + i, y + j, BLACK);
-            }
-        }
-    }
-    else if (downArrowPressed)
-    {
-        for (int i = 0; i < CAR_WIDTH; ++i) {
-            for (int j = 0; j < 2; ++j) {
-                plot_pixel(x + i, y + j, BLACK);
-            }
-        }
-    }
 }
 
 
@@ -720,12 +818,74 @@ void delete_text(int x, int y, char * text_ptr) {
     }
 }
 
+void game_over(){
+
+    clear_screen();
+    write_text(15, 10, "GAME OVER");
+    // is_game_started = false;
+
+}
+
+void acc_control(){
+
+    int16_t first = acc_value[0] / 2.5;
+    int16_t second = acc_value[1] / 2.5;
+    int16_t third = acc_value[2] / 2.5;
+	
+	if(first > 99) {
+		first = 99;
+	}
+	else if(first < 0){
+		if (first < -99){
+			first = 99;
+		}
+		else{
+			first *= -1;
+
+		}
+	}
+	
+	if(second > 99) {
+		second = 99;
+	}
+	else if(second < 0){
+		if (second < -99){
+			second = 99;
+		}
+		else{
+			second *= -1;
+		}
+	}
+	
+	
+	if(third > 99) {
+		third = 99;
+	}
+	else if(third < 0){
+		if (third < -99){
+			third = 99;
+		}
+		else
+		{
+			third *= -1;
+		}
+	}
+
+    first *= 0.002;
+    second *= 0.002;
+    // third *= 0.002;
+    car_vel_x += first;
+    car_vel_y += second;
+
+}
+
 void setup_timer(uint32_t load_value) {
     load_value = load_value * 100000;
     uint16_t counter_low = (load_value) & 0xFFFF;
     uint16_t counter_high = (load_value >> 16) & 0xFFFF;
     // uint16_t counter_low = 0xD784;
     // uint16_t counter_high = 0x017;
+    printf("counter_low: %x, counter_high: %x\n", counter_low, counter_high);
     
     *(volatile uint32_t *)TIMER_STARTLOW = counter_low;
     *(volatile uint32_t *)TIMER_STARTHIGH = counter_high;
@@ -772,7 +932,22 @@ void keyboard_ISR(void) {
             if (byte0 == 0x75) upArrowPressed = true;
             if (byte0 == 0x72) downArrowPressed = true;
         }
+        if (byte0 == 0x29 && !is_game_started) { // Space key
+            if(!SIMULATION) {
+
+                if(!start_acc()){
+                    printf("Error in starting accelerometer\n");
+                    return;
+                }
+            }
+            keyboard_control = false;
+            accelerometer_control = true;
+            start_game();
+        }
+        
+
         if(byte0 == 0x5A && !is_game_started){ //enter key
+            
             keyboard_control = true;
             accelerometer_control = false;
             start_game();
@@ -783,48 +958,58 @@ void keyboard_ISR(void) {
 
             if(leftArrowPressed){  //left arrow
                 if(car_x > ROAD_STARTING_X + CAR_WIDTH){
-                car_vel_x -= 0.2;    
+                car_vel_x -= X_ACCELERATION;    
                 }
             }
             if(rightArrowPressed){  //right arrow
                 if(car_x < ROAD_ENDING_X - CAR_WIDTH ){
-                    car_vel_x += 0.2;
+                    car_vel_x += X_ACCELERATION;
                 }
             }
             if(upArrowPressed){ //up arrow
                 if(car_y > 0){
-                    car_vel_y -= 0.2;
+                    car_vel_y = - Y_ACCELERATION;
                 }
                 }
             if (downArrowPressed) // down arrow
             {
                 if(car_y < SCREEN_HEIGHT - CAR_HEIGHT){
-                    car_vel_x += 0.2;
+                    car_vel_y = Y_ACCELERATION;
                 }
             }
-            if(car_vel_x > 6)
-                car_vel_x = 6;
-            if(car_vel_y > 6)
-                car_vel_y = 6;
-            car_x += car_vel_x;
-            car_y += car_vel_y;
+            if(car_vel_x > 4)
+                car_vel_x = 4;
+            if(car_vel_y > 4)
+                car_vel_y = 4;
+
+            car_x += (int)car_vel_x;
+            car_y += (int)car_vel_y;
+
             if(car_x < ROAD_STARTING_X){
-                car_x = ROAD_STARTING_X + 3;
+                // car_x = ROAD_STARTING_X + 6;
+                car_x -= (int)car_vel_x;
                 car_vel_x = 0;
             }
             if(car_x > ROAD_ENDING_X - CAR_WIDTH){
-                car_x = ROAD_ENDING_X - CAR_WIDTH - 3;
+                // car_x = ROAD_ENDING_X - CAR_WIDTH - 6;
+                car_x -= (int)car_vel_x;
                 car_vel_x = 0;
             }
             if(car_y < 0){
-                car_y = 3;
+                // car_y = 6;
+                car_y -= (int)car_vel_y;
                 car_vel_y = 0;
             }
             if(car_y > SCREEN_HEIGHT - CAR_HEIGHT){
-                car_y = SCREEN_HEIGHT - CAR_HEIGHT - 3;
+                // car_y = SCREEN_HEIGHT - CAR_HEIGHT - 6;
+                car_y -= (int)car_vel_y;
                 car_vel_y = 0;
             }
-            
+
+            printf("keyboard isr: car_x: %d, car_y: %d\n", car_x, car_y);
+            printf("car_vel_x: %f, car_vel_y: %f\n", car_vel_x, car_vel_y);
+            erase_car(car_x, car_y);
+
             
 
             // redraw_dashed_lines();
@@ -834,6 +1019,137 @@ void keyboard_ISR(void) {
     return;
 }
 
+static void ADXL345_REG_WRITE(uint8_t address, uint8_t value) {
+
+  *(I2C0_DATA_CMD) = address + 0x400;
+  *(I2C0_DATA_CMD) = value;
+}
+void ADXL345_Init() {
+
+    ADXL345_REG_WRITE(ADXL345_REG_DATA_FORMAT, XL345_RANGE_2G | XL345_FULL_RESOLUTION);
+    // Output Data Rate: 100Hz
+    ADXL345_REG_WRITE(ADXL345_REG_BW_RATE, XL345_RATE_100);
+    // stop measure
+    ADXL345_REG_WRITE(ADXL345_REG_POWER_CTL, XL345_STANDBY);
+    // start measure
+    ADXL345_REG_WRITE(ADXL345_REG_POWER_CTL, XL345_MEASURE);
+	
+}
+// Read value from internal register at address
+void ADXL345_REG_READ(uint8_t address, uint8_t * value) {
+
+    // Send reg address (+0x400 to send START signal)
+    * I2C0_DATA_CMD = address + 0x400;
+    // Send read signal
+    * I2C0_DATA_CMD = 0x100;
+    // Read the response (first wait until RX buffer contains data)
+    while ( * I2C0_RXFLR == 0) {}
+    * value = * I2C0_DATA_CMD;
+}
+// Return true if there is new data
+bool ADXL345_IsDataReady() {
+    bool bReady = false;
+    uint8_t data8;
+
+    ADXL345_REG_READ(ADXL345_REG_INT_SOURCE, & data8);
+    if (data8 & XL345_DATAREADY)
+        bReady = true;
+
+    return bReady;
+}
+
+/* Multiple Byte Write */
+void ADXL345_REG_MULTI_READ(uint8_t address, uint8_t values[], uint8_t len) {
+
+  int i = 0;
+  int nth_byte = 0;
+  *(I2C0_DATA_CMD) = address + 0x400;
+
+  //send read signal multiple times to prevent overwritten data at 
+  //inconsistent times
+
+  for (i = 0; i < len; i++)
+    *
+    (I2C0_DATA_CMD) = 0x100;
+
+  while (len) {
+    if ( * (I2C0_RXFLR) > 0) {
+      values[nth_byte] = * (I2C0_DATA_CMD) & 0xFF;
+      nth_byte++;
+      len--;
+    }
+  }
+}
+
+
+// Read acceleration data of all three axes
+void ADXL345_XYZ_Read(int16_t szData16[3]) {
+
+  uint8_t szData8[6];
+  ADXL345_REG_MULTI_READ(0x32, (uint8_t * ) & szData8, sizeof(szData8));
+
+  szData16[0] = (szData8[1] << 8) | szData8[0];
+  szData16[1] = (szData8[3] << 8) | szData8[2];
+  szData16[2] = (szData8[5] << 8) | szData8[4];
+}
+
+void I2C0_Init() {
+
+  // Abort any ongoing transmits and disable I2C0.
+  * I2C0_ENABLE = 2;
+
+  // Wait until I2C0 is disabled
+  while ((( * I2C0_ENABLE_STATUS) & 0x1) == 1) {}
+  // Configure the config reg with the desired setting (act as
+  // a master, use 7bit addressing, fast mode (400kb/s)).
+  * I2C0_CON = 0x65;
+
+  // Set target address (disable special commands, use 7bit addressing)
+  * I2C0_TAR = 0x53;
+
+  // Set SCL high/low counts (Assuming default 100MHZ clock input to
+  //I2C0 Controller).
+  // The minimum SCL high period is 0.6us, and the minimum SCL low
+  //period is 1.3 us,
+  // However, the combined period must be 2.5us or greater, so add 0.3us
+  //to each.
+  * I2C0_FS_SCL_HCNT = 60 + 30; // 0.6us + 0.3us
+  * I2C0_FS_SCL_LCNT = 130 + 30; // 1.3us + 0.3us
+
+  // Enable the controller
+  * I2C0_ENABLE = 1;
+
+  // Wait until controller is powered on
+  while ((( * I2C0_ENABLE_STATUS) & 0x1) == 0) {}
+}
+
+void Pinmux_Config() {
+  * SYSMGR_I2C0USEFPGA = 0;
+  * SYSMGR_GENERALIO7 = 1;
+  * SYSMGR_GENERALIO8 = 1;
+}
+
+bool start_acc(){
+    uint8_t device_id;
+    
+    Pinmux_Config();
+    I2C0_Init();
+    ADXL345_REG_READ(0x00, & device_id);
+
+    if (device_id == 0xE5)
+    {
+        ADXL345_Init();
+    } 
+    else
+    {
+        printf("Device id is not correct\n");
+        return false;
+    }
+    return true;
+
+}
+
+    
 void timer_ISR(){
     *(volatile uint32_t *)TIMER_STATUS = 0;
     timer_end = true;
@@ -845,13 +1161,8 @@ void __attribute__((interrupt)) __cs3_isr_irq(void) {
 	int interrupt_ID = *((int *)GIC_ICCIAR);
 	if (interrupt_ID == 79) // check if interrupt is from the KEYs
 	{   
-        if(keyboard_control = true)
+        if(keyboard_control == true)
             keyboard_ISR();
-        else if (accelerometer_control = true)
-        {
-            keyboard_ISR_acc();
-        }
-        
     }
     else if (interrupt_ID == 72){
         timer_ISR();
@@ -928,13 +1239,13 @@ void config_GIC(void) {
 
 void enable_A9_interrupts(void) {
 	int status = 0b01010011;
-	asm("msr cpsr, %[ps]" : : [ps] "r"(status));
+	__asm__("msr cpsr, %[ps]" : : [ps] "r"(status));
 }
 
 // Turn off interrupts in the ARM processor
 void disable_A9_interrupts(void) {
 	int status = 0b11010011;
-	asm("msr cpsr, %[ps]" : : [ps] "r"(status));
+	__asm__("msr cpsr, %[ps]" : : [ps] "r"(status));
 }
 
 //Initialize the banked stack pointer register for IRQ mode
@@ -943,10 +1254,10 @@ void set_A9_IRQ_stack(void) {
 	stack = 0xFFFFFFFF - 7;
 	/* change processor to IRQ mode with interrupts disabled */
 	mode = 0b11010010;
-	asm("msr cpsr, %[ps]" : : [ps] "r"(mode));
+	__asm__("msr cpsr, %[ps]" : : [ps] "r"(mode));
 	/* set banked stack pointer */
-	asm("mov sp, %[ps]" : : [ps] "r"(stack));
+	__asm__("mov sp, %[ps]" : : [ps] "r"(stack));
 	/* go back to SVC mode before executing subroutine return! */
 	mode = 0b11010011;
-	asm("msr cpsr, %[ps]" : : [ps] "r"(mode));
+	__asm__("msr cpsr, %[ps]" : : [ps] "r"(mode));
 }
